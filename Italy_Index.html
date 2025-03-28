@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choropleth Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-ajax/dist/leaflet.ajax.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
+    <style>
+        html, body, #map {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        .legend {
+            line-height: 18px;
+            color: #555;
+            background: wheat;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .legend i {
+            width: 18px;
+            height: 18px;
+            float: left;
+            margin-right: 8px;
+            opacity: 0.9;
+        }
+        .map-title {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 20px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="map-title">Choropleth Map of Italian UNESCO World Heritage Sites by Region</div>
+    <div id="map"></div>
+
+    <script>
+        // Initialize map
+        var map = L.map('map').setView([41.9, 12.5], 5);  // Center over Italy
+
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community'
+        }).addTo(map);
+
+        // Function to get color based on UNESCO sites
+        function getColor(d, max) {
+            let scale = chroma.scale(['#0302FC', '#2A00D5', '#63009E', '#A1015D', '#D80027', '#FE0002'])
+                            .domain([0, max]);
+            return scale(d).hex();
+        }
+
+        // Style function with smaller, more transparent points
+        function style(feature) {
+            return {
+                weight: 1.5,                // Thinner borders
+                opacity: 1,             // Border transparency
+                color: '#333',
+                dashArray: '2',
+                fillOpacity: 0.7,         // More transparency
+                fillColor: getColor(feature.properties.UNESCO, 10)
+            };
+        }
+
+        // Add Circle Markers for point-based features
+        function pointToLayer(feature, latlng) {
+            return L.circleMarker(latlng, {
+                radius: Math.max(3, feature.properties.UNESCO / 2),  // Smaller size, proportional to UNESCO count
+                fillColor: getColor(feature.properties.UNESCO, 10),
+                color: '#333',
+                weight: 1,
+                opacity: 0.8,
+                fillOpacity: 0.4
+            });
+        }
+
+        function highlightFeature(e) {
+            var layer = e.target;
+            layer.setStyle({
+                weight: 3,
+                color: '#666',
+                fillOpacity: 0.9
+            });
+            
+        //Adding tooltip displaying name and number of sites
+        var props = layer.feature.properties;
+            layer.bindTooltip(`
+                <strong>${props.name}</strong><br>
+                UNESCO Sites: ${props.UNESCO}
+            `, {
+                permanent: false,   // Hide tooltip on mouseout
+                direction: "auto",
+                offset: L.point(0, -10), // Position offset
+                opacity: 0.9
+            }).openTooltip();
+            layer.bringToFront();
+        }
+
+        function resetHighlight(e) {
+            geojson.resetStyle(e.target);
+        }
+
+        function onEachFeature(feature, layer) {
+            layer.on({
+                mouseover: highlightFeature,
+                mouseout: resetHighlight
+            });
+
+            if (feature.properties) {
+                layer.bindPopup(`
+                    <strong>${feature.properties.name}</strong><br>
+                    UNESCO Sites: ${feature.properties.UNESCO}
+                `);
+            }
+        }
+
+        // Load GeoJSON data
+        var geojson = new L.GeoJSON.AJAX("https://raw.githubusercontent.com/User2CLK/Italian-UNESCO-Sites-Choropleth-Map/main/Italy%20Map.geojson", {
+            style: style,
+            onEachFeature: onEachFeature,
+            pointToLayer: pointToLayer  // Apply point styling
+        }).addTo(map);
+
+        // Display legend immediately
+        function addLegend(maxSites = 10) {
+            let legend = L.control({ position: "bottomright" });
+
+            legend.onAdd = function () {
+                let div = L.DomUtil.create("div", "legend"),
+                    grades = [0, Math.ceil(maxSites / 4), Math.ceil(maxSites / 2), Math.ceil(3 * maxSites / 4), maxSites];
+
+                div.innerHTML = '<strong>UNESCO Sites</strong><br>';
+
+                for (let i = 0; i < grades.length; i++) {
+                    div.innerHTML +=
+                        `<i style="background:${getColor(grades[i], maxSites)}"></i> 
+                        ${grades[i]} ${grades[i + 1] ? '&ndash; ' + grades[i + 1] : '+'}<br>`;
+                }
+                return div;
+            };
+
+            legend.addTo(map);
+        }
+
+        // Attach legend immediately so it shows even before data is loaded
+        addLegend();
+
+        geojson.on('data:loaded', () => {
+            let maxSites = Math.max(...geojson.toGeoJSON().features.map(f => f.properties.UNESCO));
+
+            geojson.eachLayer(layer => {
+                layer.setStyle({
+                    weight: 1,
+                    opacity: 0.8,
+                    color: '#333',
+                    dashArray: '2',
+                    fillOpacity: 0.4,
+                    fillColor: getColor(layer.feature.properties.UNESCO, maxSites)
+                });
+            });
+
+            // Refresh the legend with the correct max UNESCO sites
+            addLegend(maxSites);
+        });
+
+    </script>
+</body>
+</html>
+
